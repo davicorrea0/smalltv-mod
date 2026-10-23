@@ -21,9 +21,15 @@ class EntryManifest : public ManifestSource {
   Source& source_;
   uint32_t offset_, length_;
 };
+// The entry's position in the index, or entries_.size() if there is none.
+size_t Package::indexOf(const std::string& path) const {
+  size_t i = 0;
+  while (i < entries_.size() && entries_[i].path != path) ++i;
+  return i;
+}
 const Package::Entry* Package::find(const std::string& path) const {
-  for (const auto& entry : entries_) if (entry.path == path) return &entry;
-  return nullptr;
+  size_t i = indexOf(path);
+  return i < entries_.size() ? &entries_[i] : nullptr;
 }
 // Reads and validates an .stheme container's index, then its manifest, then
 // cross-checks every image/animation layer's declared source against the
@@ -92,8 +98,9 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       if (!e.width || e.width > 240 || !e.height || e.height > 240 || b[8] > 1 || b[9] || b[10] || b[11] ||
           e.length != 12 + uint32_t(e.width) * e.height * e.stride) return false;
     }
+    const uint32_t length = e.length;
     entries_.push_back(std::move(e));
-    pos += entries_.back().length;
+    pos += length;
   }
   return pos == size;
 }
@@ -127,8 +134,8 @@ __attribute__((noinline)) bool Package::checkAssets(Theme& candidate, std::strin
 // as "is this entry an image, not the manifest" -- the manifest entry always
 // has stride 0 and so can never be resolved as an asset.
 AssetHandle Package::resolve(const std::string& path) {
-  const Entry* entry = find(path);
-  return entry && entry->stride ? static_cast<AssetHandle>(entry - entries_.data()) : InvalidAsset;
+  size_t i = indexOf(path);
+  return i < entries_.size() && entries_[i].stride ? static_cast<AssetHandle>(i) : InvalidAsset;
 }
 // Reads exactly the `count` pixels of row `y` starting at column `x`,
 // unpacking each pixel from its 2- or 3-byte on-disk form (RGB565, plus an

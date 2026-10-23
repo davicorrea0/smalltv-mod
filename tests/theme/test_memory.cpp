@@ -129,6 +129,49 @@ static Usage load(const char* path) {
   return usage;
 }
 
+// A package with many files: its index must not need one large block (each
+// entry is about 40 bytes, so a vector of 41 needed 1,640 B in one piece),
+// and every handle must still read its own file.
+static void testManyEntries() {
+  const unsigned images = 64;
+  const std::string manifest = R"({"spec":1,"theme":{"id":"many","name":"Many","author":"Me","version":"1"},)"
+    R"("display":{"width":240,"height":240,"background":"#000000"},"layers":[]})";
+  FileSource source("");
+  auto u16 = [&](unsigned v) { source.bytes += char(v & 255); source.bytes += char(v >> 8); };
+  auto u32 = [&](uint32_t v) { u16(v & 0xffff); u16(v >> 16); };
+  source.bytes = "STH1";
+  u16(images + 1); u16(0);
+  u16(10); u32(manifest.size()); source.bytes += "theme.json" + manifest;
+  for (unsigned i = 0; i < images; ++i) {
+    char path[16];
+    snprintf(path, sizeof(path), "img/%03u.sti", i);
+    u16(strlen(path)); u32(14); source.bytes += path;
+    source.bytes += "STI1"; u16(1); u16(1); source.bytes += std::string(4, '\0');
+    u16(i);  // the one pixel holds the image's own number
+  }
+  Theme theme;
+  std::string error;
+  live = peak = largest = 0;
+  counting = true;
+  {
+    Package package(source);
+    bool ok = package.load(theme, error);
+    if (!ok) std::cerr << "many entries: " << error << "\n";
+    assert(ok);
+    for (unsigned i : {0u, 31u, 63u}) {
+      char path[16];
+      snprintf(path, sizeof(path), "img/%03u.sti", i);
+      AssetHandle handle = package.resolve(path);
+      uint16_t color = 0;
+      uint8_t alpha = 0;
+      assert(handle != InvalidAsset && package.row(handle, 0, 0, 1, &color, &alpha) && color == i);
+    }
+  }
+  counting = false;
+  if (largest > LargestBlockBudget) fprintf(stderr, "%u entries: largest block %zu B\n", images + 1, largest);
+  assert(largest <= LargestBlockBudget);
+}
+
 // BlockList: the vector subset the engine uses, without one large block.
 static void testBlockList() {
   BlockList<int> numbers;
@@ -197,6 +240,7 @@ static void testBlockList() {
 
 int main(int argc, char** argv) {
   testBlockList();
+  testManyEntries();
   const char* examples[] = {"examples/themes/pixel-room.stheme", "examples/themes/live-status.stheme",
                             "examples/themes/terminal-ops.stheme"};
   bool report = argc > 1;

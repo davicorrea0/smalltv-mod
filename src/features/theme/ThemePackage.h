@@ -28,7 +28,10 @@ class Package : public Assets {
     uint8_t stride = 0;
   };
   Source& source_;
-  std::vector<Entry> entries_;
+  // About 40 bytes per entry, and every animation frame is one: in one
+  // vector, a package with many frames needed a block of several KiB.
+  BlockList<Entry> entries_;
+  size_t indexOf(const std::string& path) const;
   const Entry* find(const std::string& path) const;
   bool readIndex(std::string& error);
   bool checkAssets(Theme& theme, std::string& error) const;
