@@ -21,10 +21,27 @@ class EntryManifest : public ManifestSource {
   Source& source_;
   uint32_t offset_, length_;
 };
+static uint32_t pathHash(const std::string& path) {
+  uint32_t hash = 2166136261u;
+  for (unsigned char c : path) hash = (hash ^ c) * 16777619u;
+  return hash;
+}
+// Compares `path` with the entry's path as stored in the package. In small
+// pieces: this runs while a frame is drawn, when little loop stack is left.
+bool Package::samePath(const Entry& entry, const std::string& path) const {
+  if (entry.pathLength != path.size()) return false;
+  char piece[16];
+  for (size_t at = 0; at < path.size(); at += sizeof(piece)) {
+    size_t count = std::min(sizeof(piece), path.size() - at);
+    if (!source_.read(entry.offset - entry.pathLength + at, piece, count) || memcmp(piece, path.data() + at, count)) return false;
+  }
+  return true;
+}
 // The entry's position in the index, or entries_.size() if there is none.
 size_t Package::indexOf(const std::string& path) const {
+  const uint32_t hash = pathHash(path);
   size_t i = 0;
-  while (i < entries_.size() && entries_[i].path != path) ++i;
+  while (i < entries_.size() && (entries_[i].hash != hash || !samePath(entries_[i], path))) ++i;
   return i;
 }
 const Package::Entry* Package::find(const std::string& path) const {
@@ -78,12 +95,14 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
     e.length = u32(b + 2);
     pos += 6;
     if (!len || len > 120 || len > size - pos) return false;
-    e.path.resize(len);
-    if (!source_.read(pos, &e.path[0], len) || !validPath(e.path) || find(e.path)) return false;
+    std::string path(len, '\0');
+    if (!source_.read(pos, &path[0], len) || !validPath(path) || find(path)) return false;
+    e.hash = pathHash(path);
+    e.pathLength = static_cast<uint8_t>(len);
     pos += len;
     e.offset = pos;
     if (e.length > size - pos) return false;
-    if (e.path == "theme.json") {
+    if (path == "theme.json") {
       if (e.length == 0 || e.length > MaxManifest) return false;
     } else {
       // Every non-manifest entry must be a well-formed .sti image: "STI1"
@@ -91,7 +110,7 @@ __attribute__((noinline)) bool Package::readIndex(std::string& error) {
       // stride (2 bytes/pixel opaque, 3 with an alpha byte), 3 reserved
       // zero bytes, and a payload length that matches width*height*stride
       // exactly -- nothing here is inferred, every field is cross-checked.
-      if (e.path.size() < 4 || e.path.substr(e.path.size() - 4) != ".sti" || e.length < 12 || !source_.read(pos, b, 12) || memcmp(b, "STI1", 4)) return false;
+      if (path.size() < 4 || path.substr(path.size() - 4) != ".sti" || e.length < 12 || !source_.read(pos, b, 12) || memcmp(b, "STI1", 4)) return false;
       e.width = u16(b + 4);
       e.height = u16(b + 6);
       e.stride = b[8] ? 3 : 2;
