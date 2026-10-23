@@ -28,15 +28,25 @@ void reply(int code, const String& message) {
   server->send(code, "application/json", json);
 }
 // ESP32's LittleFS exposes totalBytes()/usedBytes() directly; ESP8266's only
-// reports them through info(FSInfo&).
+// reports them through info(FSInfo&). Both walk the filesystem's blocks, and
+// every list and upload start asks, so the answer is kept for a few seconds
+// and dropped after this file's own writes (forgetFreeBytes()).
+size_t cachedFree = 0;
+uint32_t cachedFreeAt = 0;
+bool cachedFreeValid = false;
 size_t freeBytes() {
+  if (cachedFreeValid && millis() - cachedFreeAt < 5000) return cachedFree;
 #if defined(SMALLTV_ESP8266)
   FSInfo info;
-  return LittleFS.info(info) ? info.totalBytes - info.usedBytes : 0;
+  cachedFree = LittleFS.info(info) ? info.totalBytes - info.usedBytes : 0;
 #else
-  return LittleFS.totalBytes() - LittleFS.usedBytes();
+  cachedFree = LittleFS.totalBytes() - LittleFS.usedBytes();
 #endif
+  cachedFreeAt = millis();
+  cachedFreeValid = true;
+  return cachedFree;
 }
+void forgetFreeBytes() { cachedFreeValid = false; }
 unsigned installedCount() {
   unsigned count = 0;
   File dir = LittleFS.open("/themes", "r");
@@ -46,6 +56,7 @@ unsigned installedCount() {
 void resetUpload() {
   upload.close();
   LittleFS.remove(staging);
+  forgetFreeBytes();
   uploadParts = 0;
   uploadAllowed = false;
   uploadEnded = false;
@@ -313,6 +324,7 @@ void deleteTheme() {
     reply(404, "Theme not found or could not be removed");
     return;
   }
+  forgetFreeBytes();
   reply(200, id);
 }
 }
