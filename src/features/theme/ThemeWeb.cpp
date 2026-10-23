@@ -16,6 +16,7 @@ bool uploadAllowed = false, uploadEnded = false;
 unsigned uploadParts = 0;
 uint32_t uploaded = 0, uploadBudget = 0;
 constexpr unsigned MaxThemes = 16;
+static_assert(MaxThemes <= 32, "listThemes() marks packages in a 32-bit mask");
 const char* staging = "/themes/.upload";
 // Every theme API route replies with the same small JSON shape: `{"id":...}`
 // on success, `{"error":...}` otherwise, keyed by whether `code` is a success
@@ -47,6 +48,19 @@ size_t freeBytes() {
   return cachedFree;
 }
 void forgetFreeBytes() { cachedFreeValid = false; }
+String metaPath(const String& id) { return "/themes/" + id + ".meta"; }
+// Writes the listing sidecar for a package that just passed Package::load()
+// (see readThemeMeta()). A failed write only costs a full inspection the next
+// time the package is listed.
+void writeMeta(const String& id, const smalltv::InstalledTheme& entry) {
+  std::string json = smalltv::themeMetaJson(entry);
+  File meta = LittleFS.open(metaPath(id), "w");
+  if (meta && meta.write(reinterpret_cast<const uint8_t*>(json.data()), json.size()) != json.size()) {
+    meta.close();
+    LittleFS.remove(metaPath(id));
+  }
+  forgetFreeBytes();
+}
 unsigned installedCount() {
   unsigned count = 0;
   File dir = LittleFS.open("/themes", "r");
@@ -180,6 +194,14 @@ void finishUpload() {
     resetUpload();
     return;
   }
+  smalltv::InstalledTheme entry;
+  entry.id = theme.id;
+  entry.name = theme.name;
+  entry.author = theme.author;
+  entry.version = theme.version;
+  entry.bytes = uploaded;
+  entry.valid = true;
+  writeMeta(theme.id.c_str(), entry);
   reply(201, theme.id.c_str());
   resetUpload();
 }
@@ -205,9 +227,12 @@ bool requestId(String& id) {
   return true;
 }
 // GET /api/themes: every installed package's metadata and validity, without
-// requiring any of them to be the currently active theme -- inspectInstalledTheme()
-// runs the same validator a selection would use, so an invalid or corrupt
-// package still gets listed (with its error), just not selectable.
+// requiring any of them to be the currently active theme. A package with a
+// matching `.meta` sidecar (written at install, see readThemeMeta()) is listed
+// from it; any other one goes through inspectInstalledTheme(), the same
+// validator a selection would use, so an invalid or corrupt package still gets
+// listed (with its error), just not selectable. A valid one then gets its
+// sidecar, so it is only inspected once.
 void listThemes() {
   if (!auth()) return;
   JsonDocument doc;
@@ -215,9 +240,11 @@ void listThemes() {
   doc["error"] = g_themeMode.error();
   doc["freeBytes"] = freeBytes();
   JsonArray list = doc["themes"].to<JsonArray>();
-  // Inspecting a package parses it; free the running theme first if the heap
-  // is short (issue #30). Its error is already copied into the reply above.
-  g_themeMode.release();
+  // Inspecting a package parses it; before the first one that needs it, free
+  // the running theme if the heap is short (issue #30). Its error is already
+  // copied into the reply above.
+  bool released = false;
+  uint32_t needMeta = 0;  // bit i: list[i] was inspected and is valid
   File dir = LittleFS.open("/themes", "r");
   unsigned count = 0;
   for (File entry = dir.openNextFile(); entry && count < MaxThemes; entry = dir.openNextFile()) {
@@ -227,9 +254,22 @@ void listThemes() {
     if (slash >= 0) name = name.substring(slash + 1);
     String id = name.substring(0, name.length() - 7);
     if (!smalltv::validId(id.c_str())) continue;
-    ThemeFile file;
-    file.open("/themes/" + name);
-    auto info = smalltv::inspectInstalledTheme(file, id.c_str());
+    smalltv::InstalledTheme info;
+    bool fromMeta = false;
+    {
+      ThemeFile meta;
+      fromMeta = meta.open(metaPath(id)) && smalltv::readThemeMeta(meta, id.c_str(), entry.size(), info);
+    }
+    if (!fromMeta) {
+      if (!released) {
+        g_themeMode.release();
+        released = true;
+      }
+      ThemeFile file;
+      file.open("/themes/" + name);
+      info = smalltv::inspectInstalledTheme(file, id.c_str());
+      if (info.valid) needMeta |= 1u << count;
+    }
     JsonObject o = list.add<JsonObject>();
     o["id"] = info.id.c_str();
     o["name"] = info.name.c_str();
@@ -240,6 +280,19 @@ void listThemes() {
     o["error"] = info.error.c_str();
     ++count;
     yield();
+  }
+  dir.close();
+  // Sidecars are written after the directory walk, not during it, so new files
+  // in /themes cannot disturb the iteration. MaxThemes fits in the bit mask.
+  for (unsigned i = 0; i < count; ++i) {
+    if (!(needMeta & (1u << i))) continue;
+    JsonObjectConst o = list[i];
+    smalltv::InstalledTheme entry;
+    entry.name = o["name"].as<const char*>();
+    entry.author = o["author"].as<const char*>();
+    entry.version = o["version"].as<const char*>();
+    entry.bytes = o["bytes"].as<uint32_t>();
+    writeMeta(o["id"].as<const char*>(), entry);
   }
   String json;
   serializeJson(doc, json);
@@ -324,6 +377,7 @@ void deleteTheme() {
     reply(404, "Theme not found or could not be removed");
     return;
   }
+  LittleFS.remove(metaPath(id));
   forgetFreeBytes();
   reply(200, id);
 }
