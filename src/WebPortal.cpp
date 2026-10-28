@@ -586,8 +586,12 @@ void webPortalBegin(Settings& settings) {
   server.onNotFound(handleNotFound);
 
   // Headers the guard reads; the server drops all others.
+#if defined(SMALLTV_FAMILY_ESP8266)
+  server.collectHeaders("Origin", "Sec-Fetch-Site");   // variadic, keeps Authorization
+#else
   static const char* kGuardHeaders[] = {"Origin", "Sec-Fetch-Site"};
   server.collectHeaders(kGuardHeaders, 2);
+#endif
 
   server.begin();
 }
