@@ -214,6 +214,17 @@ static void handleStatus() {
   d.contstk = platformFreeContStack();   // primary stack headroom (ESP8266)
   d.uptime = millis() / 1000;
   d.reset = appResetReason();
+  PlatformCrashRecord cr;                // last crash, kept in RTC memory until cleared or power-cycled
+  if (platformCrashRecordGet(cr)) {
+    d.crash.present = true;
+    d.crash.reason = cr.reason;
+    d.crash.fw = cr.fw;
+    d.crash.exccause = cr.exccause;
+    d.crash.epc = cr.epc1;
+    d.crash.addr = cr.excvaddr;
+    d.crash.uptimeS = cr.uptimeS;
+    d.crash.uptimeKnown = cr.uptimeKnown;
+  }
   d.synced = clockSynced();
   d.time = clockText.c_str();
   d.tz = S->clock.tz.c_str();
@@ -359,6 +370,12 @@ static void handleReboot() {
   if (!requireAuth()) return;
   server.send(200, "application/json", "{\"ok\":true}");
   scheduleReboot(400);
+}
+
+static void handleCrashClear() {
+  if (!requireAuth()) return;
+  platformCrashRecordClear();
+  server.send(200, "application/json", "{\"ok\":true}");
 }
 
 static void handleFactory() {
@@ -598,6 +615,7 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/scan", HTTP_GET, handleScan);
   server.on("/api/reboot", HTTP_POST, handleReboot);
   server.on("/api/factory", HTTP_POST, handleFactory);
+  server.on("/api/crash/clear", HTTP_POST, handleCrashClear);
   server.on("/api/refresh", HTTP_POST, handleRefresh);
   server.on("/api/export", HTTP_GET, handleExport);
   server.on("/api/import", HTTP_POST, handleImport);

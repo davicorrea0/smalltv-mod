@@ -18,6 +18,7 @@
 // Call order: writeStatusHead(), then writeStatusTickers() if the build has
 // the ticker, writeStatusRadar() if it has the radar, and writeStatusEnd().
 #include "JsonStream.h"
+#include <cstdio>
 
 namespace smalltv {
 // The Wi-Fi tunnel (WgClient.cpp). Where it is not built only the first five
@@ -31,6 +32,14 @@ struct StatusWg {
 };
 // The values behind the first part of the reply. Strings are borrowed: they
 // must live until writeStatusHead() returns.
+// What the last abnormal reset left in RTC memory (Platform.h). Left out
+// entirely unless `present`.
+struct StatusCrash {
+  bool present = false;
+  const char *reason = "", *fw = "";
+  uint32_t exccause = 0, epc = 0, addr = 0, uptimeS = 0;
+  bool uptimeKnown = false;     // `uptime` is written only then
+};
 struct StatusData {
   const char *fw = "", *version = "", *variant = "", *repo = "";
   const char* updateMsg = "";   // left out when empty
@@ -43,6 +52,7 @@ struct StatusData {
   int rssi = 0;
   uint32_t heap = 0, maxblk = 0, contstk = 0, uptime = 0;
   StatusWg wg;
+  StatusCrash crash;
 };
 struct StatusTicker {
   const char* symbol = "";
@@ -98,6 +108,17 @@ template <class Out> void writeStatusHead(Out& out, const StatusData& d) {
   member(out, PSTR(",\"contstk\":"), d.contstk);
   member(out, PSTR(",\"uptime\":"), d.uptime);
   member(out, PSTR(",\"reset\":"), d.reset);
+  if (d.crash.present) {
+    const StatusCrash& c = d.crash;
+    char h[16];
+    member(out, PSTR(",\"lastCrash\":{\"reason\":"), c.reason);
+    member(out, PSTR(",\"fw\":"), c.fw);
+    snprintf(h, sizeof(h), "0x%x", (unsigned)c.exccause);  member(out, PSTR(",\"exccause\":"), (const char*)h);
+    snprintf(h, sizeof(h), "0x%08x", (unsigned)c.epc);     member(out, PSTR(",\"epc\":"), (const char*)h);
+    snprintf(h, sizeof(h), "0x%08x", (unsigned)c.addr);    member(out, PSTR(",\"addr\":"), (const char*)h);
+    if (c.uptimeKnown) member(out, PSTR(",\"uptime\":"), c.uptimeS);
+    jsonout::raw(out, PSTR("}"));
+  }
   member(out, PSTR(",\"synced\":"), d.synced);
   if (d.time[0]) member(out, PSTR(",\"time\":"), d.time);
   member(out, PSTR(",\"tz\":"), d.tz);
