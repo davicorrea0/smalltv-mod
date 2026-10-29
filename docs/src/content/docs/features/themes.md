@@ -388,7 +388,7 @@ Angles are whole degrees, **0 at 12 o'clock and growing clockwise**, so 90 is
   `radius` and the band is `strokeWidth` wide inside it, like a circle's stroke.
   It starts at `start` (−360 to 360) and runs `sweep` degrees (−360 to 360)
   clockwise, or counter-clockwise when `sweep` is negative. A `sweep` of 360 or
-  more is a full ring and a `sweep` of 0 draws nothing, so a progress ring at 0 %
+  −360 is a full ring and a `sweep` of 0 draws nothing, so a progress ring at 0 %
   is simply empty. A `strokeWidth` of at least `radius` fills the wedge. The
   ends are flat and radial. `radius` is 1–240.
 * **`hand`** draws a line through the pivot `x`, `y`, from `tail` (0–240,
