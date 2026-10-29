@@ -21,6 +21,42 @@ static volatile bool     g_assoc = false;   // associated, maybe still waiting f
 static String      g_failText;
 static uint16_t    g_failSeq = 0;           // bumped on every new failure text
 
+// --- CVE-2020-12638 measurement instrumentation (test branch, not for merge) ---
+// 255 = no AUTHMODE_CHANGE event seen yet. Otherwise the SDK's own auth-mode
+// enum (0=open, 1=WEP, 2=WPA-PSK, 3=WPA2-PSK, 4=WPA/WPA2-PSK; ESP8266 and the
+// ESP32 IDF use the same small values for these, just different enum types).
+static volatile uint8_t  g_authMode = 255;
+static volatile uint32_t g_downgradeCount = 0;
+
+static const char* authModeName(uint8_t m) {
+  switch (m) {
+    case 0:  return "OPEN";
+    case 1:  return "WEP";
+    case 2:  return "WPA-PSK";
+    case 3:  return "WPA2-PSK";
+    case 4:  return "WPA/WPA2-PSK";
+    default: return "?";
+  }
+}
+
+// Shared by both platform event handlers below. `oldMode`/`newMode` are the
+// SDK's raw enum values. A drop to OPEN (0) while we hold saved WPA creds is
+// exactly the CVE-2020-12638 beacon-downgrade signature: threshold.authmode
+// only filters which APs WiFi.begin() will join, it is not re-checked once
+// associated, so the SDK accepts the AP's own later claim that it is now open.
+static void onAuthModeChanged(uint8_t oldMode, uint8_t newMode) {
+  g_authMode = newMode;
+  if (newMode < oldMode) {
+    g_downgradeCount++;
+    Serial.printf("[net] AUTHMODE DOWNGRADE: %s -> %s (seen %lu times)\n",
+                  authModeName(oldMode), authModeName(newMode),
+                  (unsigned long)g_downgradeCount);
+  } else {
+    Serial.printf("[net] authmode changed: %s -> %s\n",
+                  authModeName(oldMode), authModeName(newMode));
+  }
+}
+
 // Setup-mode retry: while the AP is up and nobody is on it, try the saved
 // networks again in the background (AP+STA), one at a time.
 static const uint32_t kJoinBudgetMs   = 30000;  // per network the scan can see
@@ -48,6 +84,9 @@ static void netHookEvents() {
     if (e == ARDUINO_EVENT_WIFI_STA_CONNECTED) g_assoc = true;
     else if (e == ARDUINO_EVENT_WIFI_STA_DISCONNECTED)
       onStaDisconnected(info.wifi_sta_disconnected.reason);
+    else if (e == ARDUINO_EVENT_WIFI_STA_AUTHMODE_CHANGE)
+      onAuthModeChanged((uint8_t)info.wifi_sta_authmode_change.old_mode,
+                         (uint8_t)info.wifi_sta_authmode_change.new_mode);
   });
 }
 #else
@@ -58,6 +97,16 @@ static void netHookEvents() {
       [](const WiFiEventStationModeConnected&) { g_assoc = true; });
   g_evDisconnected = WiFi.onStationModeDisconnected(
       [](const WiFiEventStationModeDisconnected& e) { onStaDisconnected((uint16_t)e.reason); });
+  // Passive measurement only on this branch (test/wifi-threshold-only): log and
+  // count every auth-mode change, but do not react to it. This is the "as the
+  // core ships today" baseline for the smalltv-mod#50 item 1 downgrade test —
+  // threshold.authmode is set in WiFi.begin() (ESP8266WiFiSTA.cpp) and nothing
+  // else here watches for a later downgrade.
+  static WiFiEventHandler evAuth = WiFi.onStationModeAuthModeChanged(
+      [](const WiFiEventStationModeAuthModeChanged& e) {
+        onAuthModeChanged((uint8_t)e.oldMode, (uint8_t)e.newMode);
+      });
+  (void)evAuth;
 }
 #endif
 
@@ -289,3 +338,6 @@ int netRSSI() {
 void        netAllowRetry(bool on) { g_retryAllowed = on; }
 const char* netFailReason() { return g_failText.c_str(); }
 uint16_t    netFailSeq()    { return g_failSeq; }
+
+const char* netAuthMode()       { return authModeName(g_authMode); }
+uint32_t    netDowngradeCount() { return g_downgradeCount; }

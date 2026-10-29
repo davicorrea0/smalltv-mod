@@ -128,6 +128,8 @@ static void handleStatus() {
   o["ip"] = netIP();
   o["rssi"] = netRSSI();
   if (netFailReason()[0]) o["wifiFail"] = netFailReason();
+  o["authmode"] = netAuthMode();         // CVE-2020-12638 test instrumentation,
+  o["downgrades"] = netDowngradeCount(); // see Net.cpp — not for the mainline merge
   o["heap"] = ESP.getFreeHeap();
   o["maxblk"] = platformMaxFreeBlock();     // largest contiguous block (TLS handshake needs one)
   o["contstk"] = platformFreeContStack();   // primary stack headroom (ESP8266)

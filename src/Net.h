@@ -26,3 +26,13 @@ void        netAllowRetry(bool on);
 // Last failed join, e.g. "Home: wrong password? (15)"; empty once joined.
 const char* netFailReason();
 uint16_t    netFailSeq();     // changes whenever netFailReason() does
+
+// --- CVE-2020-12638 measurement instrumentation (test branch, not for merge) ---
+// Current negotiated auth mode of the STA link, updated from the SDK's own
+// AUTHMODE_CHANGE event (not the configured threshold.authmode, which only
+// gates the initial join). "unknown" until the first event fires.
+const char* netAuthMode();
+// How many times the link's auth mode has been seen to drop to a weaker mode
+// (in practice: to open) since boot. Logged + exposed for the smalltv-mod#50
+// item 1 downgrade test; 0 on a device that was never targeted.
+uint32_t    netDowngradeCount();
