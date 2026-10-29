@@ -305,6 +305,28 @@ static void handleReboot() {
   scheduleReboot(400);
 }
 
+#ifdef CRASH_TEST
+// Test builds only: provoke each kind of crash so /api/status can be checked.
+// Never part of a release image; see the CRASH_TEST env in platformio.ini.
+static void __attribute__((noinline)) smash() {
+  volatile char b[8];
+  for (int i = 0; i < 96; i++) b[i] = 'A';   // clobbers the canary (-fstack-protector-all)
+}
+static void handleCrashTest() {
+  if (!requireAuth()) return;
+  String k = server.arg("kind");
+  server.send(200, "application/json", "{\"ok\":true}");
+  server.client().flush();
+  delay(100);
+  if (k == "null")       { *(volatile int*)0 = 1; }                       // exception, EXCCAUSE 29
+  else if (k == "swwdt") { for (;;) { } }                                  // software watchdog
+  else if (k == "hwwdt") { ESP.wdtDisable(); for (;;) { } }                // hardware watchdog
+  else if (k == "abort") { abort(); }                                      // 254
+  else if (k == "oom")   { for (;;) { new char[2048]; } }                  // 254 via the allocator
+  else if (k == "stack") { smash(); }                                      // 253
+}
+#endif
+
 static void handleCrashClear() {
   if (!requireAuth()) return;
   platformCrashRecordClear();
@@ -544,6 +566,9 @@ void webPortalBegin(Settings& settings) {
   server.on("/api/reboot", HTTP_POST, handleReboot);
   server.on("/api/factory", HTTP_POST, handleFactory);
   server.on("/api/crash/clear", HTTP_POST, handleCrashClear);
+#ifdef CRASH_TEST
+  server.on("/api/crashtest", HTTP_POST, handleCrashTest);
+#endif
   server.on("/api/refresh", HTTP_POST, handleRefresh);
   server.on("/api/export", HTTP_GET, handleExport);
   server.on("/api/import", HTTP_POST, handleImport);
