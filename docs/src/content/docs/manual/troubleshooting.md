@@ -131,7 +131,7 @@ Rare, but if it happens: the device restarted after an internal fault, and stays
 The device refuses two kinds of request, so that a web page on the internet cannot drive it from your browser.
 
 - "unexpected Host header" means the address you typed is not one the device recognises. It accepts its IP address, its hostname (WiFi tab), and the hostname followed by `.local`, `.lan`, `.home`, `.home.arpa`, `.internal`, `.localdomain` or `.fritz.box`. Open it by IP address, or give the device the hostname your router uses for it.
-- "cross-site request" means a browser sent a change from a page that is not the device's own. Scripts, Home Assistant, n8n and curl are not affected, because they send no `Origin` header.
+- "cross-site request" means a browser sent a change from a page that is not the device's own. Scripts, Home Assistant, n8n and curl are not affected, because they send no `Origin` header. Sending from SmallTV Studio needs `serve.py`: the editor's direct send over plain HTTP is a cross-site POST and is refused, while the relay through `serve.py` works.
 
 ## Something else
 

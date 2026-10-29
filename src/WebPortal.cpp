@@ -45,34 +45,43 @@ static void scheduleReboot(uint32_t inMs) {
 }
 
 // ---- CSRF and DNS-rebinding guard ------------------------------------------
-// Every handler goes through requireAuth(), which calls this first (the OTA
-// upload callback and the usage push call it directly). Rules in WebGuard.h.
+// Every handler goes through requireAuth(), which calls this first (the usage
+// push calls it directly). The two upload callbacks (OTA, theme install) run
+// before their final handler, so they only ask guardAllowed() and write nothing
+// when it says no; the final handler then answers 403 through requireAuth().
+// Rules in WebGuard.h.
 //   - Host: checked on every request, but not in AP mode. There the phone's
 //     captive-portal probe arrives with whatever name it is checking
 //     (connectivitycheck.gstatic.com, captive.apple.com, ...) and must get the
 //     redirect; the network is the device's own, so nothing can rebind to it.
 //   - Origin / Sec-Fetch-Site: checked on anything that is not GET/HEAD/OPTIONS.
 //     A request carrying neither (curl, Home Assistant, n8n, the daemon) passes.
-// Returns true when the request may proceed; on false it has already answered.
-static bool guardRequest() {
+// guardReject() returns the refusal text, or nullptr when the request may
+// proceed. It answers nothing, so it is safe inside an upload callback.
+static const char* guardReject() {
   String host = server.hostHeader();
   if (netMode() != NET_AP) {
     const char* name = S->hostname.length() ? S->hostname.c_str() : DEFAULT_HOSTNAME;
-    if (!webguard::hostAllowed(host.c_str(), name)) {
-      server.send(403, "text/plain", "Forbidden: unexpected Host header");
-      return false;
-    }
+    if (!webguard::hostAllowed(host.c_str(), name)) return "Forbidden: unexpected Host header";
   }
   HTTPMethod m = server.method();
   if (m != HTTP_GET && m != HTTP_HEAD && m != HTTP_OPTIONS) {
     String origin = server.header("Origin");
     String site   = server.header("Sec-Fetch-Site");
-    if (!webguard::originAllowed(origin.c_str(), site.c_str(), host.c_str())) {
-      server.send(403, "text/plain", "Forbidden: cross-site request");
-      return false;
-    }
+    if (!webguard::originAllowed(origin.c_str(), site.c_str(), host.c_str()))
+      return "Forbidden: cross-site request";
   }
-  return true;
+  return nullptr;
+}
+
+static bool guardAllowed() { return guardReject() == nullptr; }
+
+// Returns true when the request may proceed; on false it has already answered.
+static bool guardRequest() {
+  const char* why = guardReject();
+  if (!why) return true;
+  server.send(403, "text/plain", why);
+  return false;
 }
 
 // ---- optional web UI password ---------------------------------------------
@@ -510,7 +519,7 @@ static void handleUpdateDone() {
 // flash and merely lose the 200 at the end.
 static void handleUpdateUpload() {
   HTTPUpload& up = server.upload();
-  if (!guardRequest()) {
+  if (!guardAllowed()) {
     if (up.status != UPLOAD_FILE_START) Update.end();
     return;
   }
@@ -555,7 +564,7 @@ void webPortalBegin(Settings& settings) {
   g_updateMsg = otaTakeBootResult();
 
 #if WITH_THEME
-  themeWebBegin(server, settings, requireAuth);
+  themeWebBegin(server, settings, requireAuth, guardAllowed);
 #endif
   server.on("/", HTTP_GET, handleRoot);
   server.on("/api/config", HTTP_GET, handleGetConfig);
