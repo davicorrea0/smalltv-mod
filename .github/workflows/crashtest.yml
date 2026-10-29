@@ -1,0 +1,18 @@
+name: crashtest
+on: workflow_dispatch
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - run: pip install platformio==6.1.19
+      - run: pio run -e smalltv_crashtest -e smalltv_loader
+      - run: |
+          mkdir out
+          cp .pio/build/smalltv_crashtest/firmware.bin out/smalltv-crashtest.bin
+          cp .pio/build/smalltv_loader/firmware.bin out/smalltv-loader.bin
+          sha256sum out/* | tee out/SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        with: { name: crashtest, path: out }
