@@ -97,14 +97,22 @@ static void netHookEvents() {
       [](const WiFiEventStationModeConnected&) { g_assoc = true; });
   g_evDisconnected = WiFi.onStationModeDisconnected(
       [](const WiFiEventStationModeDisconnected& e) { onStaDisconnected((uint16_t)e.reason); });
-  // Passive measurement only on this branch (test/wifi-threshold-only): log and
-  // count every auth-mode change, but do not react to it. This is the "as the
-  // core ships today" baseline for the smalltv-mod#50 item 1 downgrade test —
-  // threshold.authmode is set in WiFi.begin() (ESP8266WiFiSTA.cpp) and nothing
-  // else here watches for a later downgrade.
+  // test/wifi-threshold-handler: giovi's proposed mitigation for smalltv-mod#50
+  // item 1 (CVE-2020-12638) — on top of the threshold.authmode the ESP8266 core
+  // already sets in WiFi.begin(), react to a later AUTHMODE_CHANGE by forcing a
+  // fresh WiFi.reconnect(). threshold.authmode only gates which AP the join scan
+  // will accept; it is not re-checked once associated, so a forged beacon that
+  // flips the AP's advertised mode to open is otherwise accepted silently. This
+  // handler is ESP8266-only (the #else branch of SMALLTV_FAMILY_ESP32 above);
+  // the ESP32 Arduino core's WiFiSTA.cpp performs its own authmode check on
+  // reconnect, so there is nothing to guard there (see wifi-kit research notes).
   static WiFiEventHandler evAuth = WiFi.onStationModeAuthModeChanged(
       [](const WiFiEventStationModeAuthModeChanged& e) {
         onAuthModeChanged((uint8_t)e.oldMode, (uint8_t)e.newMode);
+        if (e.newMode < e.oldMode) {
+          Serial.println(F("[net] downgrade detected, forcing WiFi.reconnect()"));
+          WiFi.reconnect();
+        }
       });
   (void)evAuth;
 }
