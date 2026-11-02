@@ -1,5 +1,8 @@
 name: crashtest
-on: workflow_dispatch
+on:
+  push:
+    branches: [ crash-record-test-v2 ]
+  workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
