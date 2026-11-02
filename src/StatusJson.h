@@ -38,6 +38,7 @@ struct StatusCrash {
   bool present = false;
   const char *reason = "", *fw = "";
   uint32_t exccause = 0, epc = 0, addr = 0, uptimeS = 0;
+  bool hasRegs = false;         // `exccause`, `epc` and `addr` are written only then
   bool uptimeKnown = false;     // `uptime` is written only then
 };
 struct StatusData {
@@ -113,9 +114,11 @@ template <class Out> void writeStatusHead(Out& out, const StatusData& d) {
     char h[16];
     member(out, PSTR(",\"lastCrash\":{\"reason\":"), c.reason);
     member(out, PSTR(",\"fw\":"), c.fw);
-    snprintf(h, sizeof(h), "0x%x", (unsigned)c.exccause);  member(out, PSTR(",\"exccause\":"), (const char*)h);
-    snprintf(h, sizeof(h), "0x%08x", (unsigned)c.epc);     member(out, PSTR(",\"epc\":"), (const char*)h);
-    snprintf(h, sizeof(h), "0x%08x", (unsigned)c.addr);    member(out, PSTR(",\"addr\":"), (const char*)h);
+    if (c.hasRegs) {
+      snprintf(h, sizeof(h), "0x%x", (unsigned)c.exccause);  member(out, PSTR(",\"exccause\":"), (const char*)h);
+      snprintf(h, sizeof(h), "0x%08x", (unsigned)c.epc);     member(out, PSTR(",\"epc\":"), (const char*)h);
+      snprintf(h, sizeof(h), "0x%08x", (unsigned)c.addr);    member(out, PSTR(",\"addr\":"), (const char*)h);
+    }
     if (c.uptimeKnown) member(out, PSTR(",\"uptime\":"), c.uptimeS);
     jsonout::raw(out, PSTR("}"));
   }

@@ -219,6 +219,7 @@ static void handleStatus() {
     d.crash.present = true;
     d.crash.reason = cr.reason;
     d.crash.fw = cr.fw;
+    d.crash.hasRegs = cr.hasRegs;
     d.crash.exccause = cr.exccause;
     d.crash.epc = cr.epc1;
     d.crash.addr = cr.excvaddr;

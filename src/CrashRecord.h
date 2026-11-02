@@ -37,6 +37,14 @@ static inline uint32_t crashCheck(const CrashRtc& r) {
   return h;
 }
 
+// The core's postmortem handler clears rst_info before it passes 253 and 254 to
+// custom_crash_callback(), so for those two the exccause/epc1/excvaddr in the
+// record are zeros, not registers. Reporting them would look like an exception
+// at address 0.
+static inline bool crashHasRegisters(uint8_t reason) {
+  return reason != CRASH_RST_STACK_SMASH && reason != CRASH_RST_SW_EXC;
+}
+
 static inline const char* crashReasonLabel(uint8_t reason) {
   switch (reason) {
     case CRASH_RST_EXCEPTION:   return "Exception";

@@ -111,9 +111,11 @@ void platformCrashRecordBegin() {
 bool platformCrashRecordGet(PlatformCrashRecord& out) {
   CrashRtc r;
   if (!crashLoad(r)) return false;
+  r.fw[sizeof(r.fw) - 1] = 0;   // the checksum vouches for the bytes, not for a terminator
   memset(&out, 0, sizeof(out));
   strlcpy(out.reason, crashReasonLabel(r.rstReason), sizeof(out.reason));
   strlcpy(out.fw, r.fw, sizeof(out.fw));
+  out.hasRegs     = crashHasRegisters(r.rstReason);
   out.exccause    = r.exccause;
   out.epc1        = r.epc1;
   out.excvaddr    = r.excvaddr;

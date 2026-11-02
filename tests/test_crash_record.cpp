@@ -31,6 +31,13 @@ int main() {
   assert(!strcmp(crashReasonLabel(255), "Unknown"));
   assert(strlen(crashReasonLabel(254)) < 24);   // PlatformCrashRecord::reason[24]
 
+  // The core zeroes rst_info for 253/254, so their registers mean nothing.
+  assert(!crashHasRegisters(253));
+  assert(!crashHasRegisters(254));
+  assert(crashHasRegisters(1));
+  assert(crashHasRegisters(2));
+  assert(crashHasRegisters(3));
+
   // The checksum covers every byte after the two header words, and not the checksum itself.
   CrashRtc a = sample();
   assert(a.check == crashCheck(a));

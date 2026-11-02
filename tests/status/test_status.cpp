@@ -61,6 +61,19 @@ static std::string reference(const Case& c) {
   o["contstk"] = d.contstk;
   o["uptime"] = d.uptime;
   o["reset"] = d.reset;
+  if (d.crash.present) {   // handleStatus() with the crash record, before it was streamed
+    const StatusCrash& k = d.crash;
+    JsonObject cr = o["lastCrash"].to<JsonObject>();
+    char h[16];
+    cr["reason"] = k.reason;
+    cr["fw"] = k.fw;
+    if (k.hasRegs) {
+      snprintf(h, sizeof(h), "0x%x", (unsigned)k.exccause);  cr["exccause"] = std::string(h);
+      snprintf(h, sizeof(h), "0x%08x", (unsigned)k.epc);     cr["epc"] = std::string(h);
+      snprintf(h, sizeof(h), "0x%08x", (unsigned)k.addr);    cr["addr"] = std::string(h);
+    }
+    if (k.uptimeKnown) cr["uptime"] = k.uptimeS;
+  }
   o["synced"] = d.synced;
   if (d.time[0]) o["time"] = std::string(d.time);
   o["tz"] = std::string(d.tz);
@@ -200,6 +213,36 @@ static std::vector<Case> cases() {
   full.radar.okAgo = 125;
   full.radar.url = "https://api.adsb.lol/v2/point/48.1/11.5/25?x=\"1\"";
   all.push_back(full);
+
+  // The last crash: an exception with its registers and the uptime, the
+  // hardware watchdog (registers, no uptime) and an abort (uptime, no registers,
+  // since the core hands over zeros there).
+  Case crash("crash", false, false);
+  crash.d.crash.present = true;
+  crash.d.crash.reason = "Exception";
+  crash.d.crash.fw = "3.3.0";
+  crash.d.crash.hasRegs = true;
+  crash.d.crash.exccause = 29;
+  crash.d.crash.epc = 0x40201234;
+  crash.d.crash.addr = 0;
+  crash.d.crash.uptimeKnown = true;
+  crash.d.crash.uptimeS = 77;
+  all.push_back(crash);
+  Case hwwdt("crash-hwwdt", false, false);
+  hwwdt.d.crash = crash.d.crash;
+  hwwdt.d.crash.reason = "Hardware watchdog";
+  hwwdt.d.crash.exccause = 0;
+  hwwdt.d.crash.epc = 0x4010abcd;
+  hwwdt.d.crash.addr = 0xffffffffu;
+  hwwdt.d.crash.uptimeKnown = false;
+  all.push_back(hwwdt);
+  Case abort_("crash-abort", true, true);
+  abort_.d.crash.present = true;
+  abort_.d.crash.reason = "Abort/out of memory";
+  abort_.d.crash.fw = "3.3.0";
+  abort_.d.crash.uptimeKnown = true;
+  abort_.d.crash.uptimeS = 12;
+  all.push_back(abort_);
 
   // A lean build: no ticker, no radar. The keys are not there at all.
   Case lean("lean", false, false);
